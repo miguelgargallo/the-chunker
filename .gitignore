@@ -1,0 +1,14 @@
+ Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Dist/Builds
+build/
+dist/
+*.spec
+
+# Virtual enviroment
+venv/
+env/
+.env

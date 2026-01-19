@@ -1,0 +1,234 @@
+import tkinter as tk
+from tkinter import ttk, messagebox
+import threading
+import sys
+import os
+import core
+
+def resource_path(relative_path):
+    """ Get absolute path to resource, works for dev and for PyInstaller """
+    try:
+        base_path = sys._MEIPASS
+    except Exception:
+        base_path = os.path.abspath(".")
+
+    return os.path.join(base_path, relative_path)
+
+class HytaleChunkerGUI:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("Hytale - The Chunker v1.0")
+        self.root.geometry("450x550")
+        self.root.resizable(False, False)
+
+        try:
+            self.root.iconbitmap(resource_path("icon.ico"))
+        except:
+            pass
+
+        # Data storage for bases [(x, z), (x, z)]
+        self.bases_data = []
+
+        # Integer Validator
+        self.int_validator = self.root.register(self.validate_integer)
+
+        self.create_widgets()
+        self.load_worlds()
+
+    def validate_integer(self, value):
+        if value == "" or value == "-":
+            return True
+        try:
+            int(value)
+            return True
+        except ValueError:
+            return False
+
+    def create_widgets(self):
+        # --- Title ---
+        ttk.Label(
+            self.root, 
+            text="Hytale - The Chunker", 
+            font=("Segoe UI", 14, "bold")
+        ).pack(pady=10)
+
+        main_frame = ttk.Frame(self.root, padding=15)
+        main_frame.pack(fill="both", expand=True)
+
+        # --- World Selection ---
+        ttk.Label(main_frame, text="Select World:").pack(anchor="w")
+        self.world_var = tk.StringVar()
+        self.world_combo = ttk.Combobox(
+            main_frame, 
+            textvariable=self.world_var, 
+            state="readonly"
+        )
+        self.world_combo.pack(fill="x", pady=(5, 10))
+
+        # --- Base Manager Frame ---
+        base_frame = ttk.LabelFrame(main_frame, text="Bases to Protect (Block Coords)", padding=10)
+        base_frame.pack(fill="both", expand=True, pady=5)
+
+        # Inputs
+        input_frame = ttk.Frame(base_frame)
+        input_frame.pack(fill="x", pady=5)
+
+        ttk.Label(input_frame, text="X:").pack(side="left")
+        self.input_x = ttk.Entry(
+            input_frame, width=8, validate="key", validatecommand=(self.int_validator, "%P")
+        )
+        self.input_x.pack(side="left", padx=5)
+
+        ttk.Label(input_frame, text="Z:").pack(side="left")
+        self.input_z = ttk.Entry(
+            input_frame, width=8, validate="key", validatecommand=(self.int_validator, "%P")
+        )
+        self.input_z.pack(side="left", padx=5)
+
+        ttk.Button(input_frame, text="Add Base", command=self.add_base).pack(side="left", padx=10)
+
+        # Listbox
+        list_frame = ttk.Frame(base_frame)
+        list_frame.pack(fill="both", expand=True)
+        
+        self.base_listbox = tk.Listbox(list_frame, height=5)
+        self.base_listbox.pack(side="left", fill="both", expand=True)
+        
+        scrollbar = ttk.Scrollbar(list_frame, orient="vertical", command=self.base_listbox.yview)
+        scrollbar.pack(side="right", fill="y")
+        self.base_listbox.config(yscrollcommand=scrollbar.set)
+
+        ttk.Button(base_frame, text="Remove Selected", command=self.remove_base).pack(anchor="e", pady=5)
+
+        # --- Radius ---
+        ttk.Label(main_frame, text="Protection Radius (Chunks):").pack(anchor="w", pady=(10, 0))
+        ttk.Label(main_frame, text="(Applies to ALL bases)", font=("Arial", 8), foreground="gray").pack(anchor="w")
+        
+        self.radius = tk.StringVar(value="1")
+        ttk.Entry(
+            main_frame, 
+            textvariable=self.radius,
+            validate="key", 
+            validatecommand=(self.int_validator, "%P")
+        ).pack(fill="x", pady=5)
+
+        # --- Options ---
+        self.dry_run = tk.BooleanVar(value=False)
+        self.backup = tk.BooleanVar(value=True)
+
+        ttk.Checkbutton(main_frame, text="Simulation (Dry Run)", variable=self.dry_run).pack(anchor="w")
+        ttk.Checkbutton(main_frame, text="Automatic Backup", variable=self.backup).pack(anchor="w")
+
+        # --- Progress ---
+        self.progress = ttk.Progressbar(main_frame, orient="horizontal", mode="determinate")
+        self.progress.pack(fill="x", pady=15)
+
+        # --- Execute Button ---
+        self.btn_execute = ttk.Button(main_frame, text="EXECUTE", command=self.start_execution)
+        self.btn_execute.pack(fill="x", ipady=5)
+
+    def load_worlds(self):
+        try:
+            path = core.get_hytale_saves_path()
+            worlds = core.list_worlds(path)
+            self.world_combo["values"] = worlds
+            if worlds:
+                self.world_combo.current(0)
+        except Exception as e:
+            messagebox.showerror("Error", f"Hytale saves not found:\n{e}")
+
+    def add_base(self):
+        val_x = self.input_x.get()
+        val_z = self.input_z.get()
+
+        if not val_x or not val_z:
+            return
+
+        # Add to data list
+        coords = (int(val_x), int(val_z))
+        self.bases_data.append(coords)
+
+        # Add to UI listbox
+        self.base_listbox.insert(tk.END, f"Base: X={coords[0]}, Z={coords[1]}")
+        
+        # Clear inputs
+        self.input_x.delete(0, tk.END)
+        self.input_z.delete(0, tk.END)
+        self.input_x.focus()
+
+    def remove_base(self):
+        selection = self.base_listbox.curselection()
+        if not selection:
+            return
+        
+        index = selection[0]
+        self.base_listbox.delete(index)
+        del self.bases_data[index]
+
+    def start_execution(self):
+        # Validation
+        if not self.world_var.get():
+            messagebox.showwarning("Warning", "Please select a world.")
+            return
+        if not self.bases_data:
+            messagebox.showwarning("Warning", "Please add at least one base to protect.")
+            return
+
+        # Lock UI
+        self.btn_execute.config(state="disabled")
+        self.progress["value"] = 0
+        
+        # Run in Thread
+        thread = threading.Thread(target=self.run_logic, daemon=True)
+        thread.start()
+
+    def run_logic(self):
+        try:
+            # Gather data
+            w_name = self.world_var.get()
+            bases = self.bases_data # List of tuples
+            rad = int(self.radius.get()) if self.radius.get() else 0
+            is_dry = self.dry_run.get()
+            do_bkp = self.backup.get()
+
+            # Run Core
+            result = core.run_processing(
+                w_name, bases, rad, is_dry, do_bkp, 
+                progress_callback=self.update_progress
+            )
+
+            # Report
+            base_msg = ", ".join([str(c) for c in result['base_regions']])
+            msg = (
+                f"Bases detected in chunks: {base_msg}\n"
+                f"-----------------------------------\n"
+                f"Protected Chunks: {result['protected']}\n"
+                f"Reset Chunks: {result['reset']}\n"
+            )
+            if result['dry_run']:
+                msg += "\n[SIMULATION MODE] No files were touched."
+            else:
+                msg += "\n[SUCCESS] World cleanup complete!"
+
+            self.root.after(0, lambda: messagebox.showinfo("Report", msg))
+
+        except Exception as e:
+            self.root.after(0, lambda: messagebox.showerror("Critical Error", str(e)))
+        
+        finally:
+            self.root.after(0, self.reset_ui)
+
+    def update_progress(self, current, total):
+        pct = (current / total) * 100
+        self.root.after(0, lambda: self.progress.configure(value=pct))
+
+    def reset_ui(self):
+        self.btn_execute.config(state="normal")
+
+def main():
+    root = tk.Tk()
+    app = HytaleChunkerGUI(root)
+    root.mainloop()
+
+if __name__ == "__main__":
+    main()
